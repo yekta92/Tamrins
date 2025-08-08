@@ -4,7 +4,7 @@ from typing import List, Optional
 import uuid 
 from uuid import uuid4
 from fastapi import HTTPException, status, APIRouter, Depends 
-from api.models.todo_model import TodoItem
+from api.models.todo import TodoItem
 from sqlmodel import Session,select
 
 from ..utils.database import get_session
@@ -113,3 +113,25 @@ def get_todos(status: Optional[str] = None,session: Session = Depends(get_sessio
     todos = session.get(TodoItem, status)
     if not todos:
         raise HTTPException(status_code=404, detail="Todo not found")
+
+
+
+@router.post("/users")
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.username == user.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    new_user = User(username=user.username, email=user.email)
+    new_user.set_password(user.password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"id": new_user.id, "username": new_user.username, "email": new_user.email}
+
+@router.post("/login")
+def login(credentials: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == credentials.username).first()
+    if not user or not user.verify_password(credentials.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}

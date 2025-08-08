@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import uuid4
 from sqlmodel import SQLModel, Field
 from pydantic import ConfigDict
+from sqlalchemy import ForeignKey
 
 
 
@@ -21,5 +22,7 @@ class TodoItem(SQLModel, table=True):
         description="Status of the Todo item, can be 'pending', 'in_progress', or 'completed'",
     )
     model_config = ConfigDict(from_attributes=True)
+    owner_id = Integer, ForeignKey("users.id"), nullable=False
+
  
 

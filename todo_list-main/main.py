@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from api.utils.database import create_db_and_tables
 from contextlib import asynccontextmanager
 
-from api.routers.todo_api import todos_router
+from api.routers.todo import todos_router
 from api.routers.auth import auth_router
 
 

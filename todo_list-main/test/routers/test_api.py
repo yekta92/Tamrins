@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from main import app  
-from api.models.todo_model import TodoItem
+from api.models.todo import TodoItem
 from test.models.test_model import TodoItem
 
 client = TestClient(app)

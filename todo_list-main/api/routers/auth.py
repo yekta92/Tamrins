@@ -125,8 +125,117 @@ async def read_users_me(
     return current_user
 
 
-@auth_router.get("/users/me/items/")
-async def read_own_items(
-    current_user: Annotated[User, Depends(get_current_active_user)],
-):
-    return [{"item_id": "Foo", "owner": current_user.username}]
+@auth_router.get("/users/me/todos/")
+def read_user_todos(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    todos = db.query(Todo).filter(Todo.owner_id == current_user.id).all()
+    return todos
+
+
+
+
+from fastapi import APIRouter, HTTPException, Depends
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+
+router = APIRouter()
+
+SECRET_KEY = "your_secret_key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+@router.post("/users")
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    existing_user = db.query(User).filter(User.username == user.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already registered")
+    new_user = User(username=user.username, email=user.email)
+    new_user.set_password(user.password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {"id": new_user.id, "username": new_user.username, "email": new_user.email}
+
+@router.post("/login")
+def login(credentials: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == credentials.username).first()
+    if not user or not user.verify_password(credentials.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    access_token = create_access_token(data={"sub": user.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+
+from fastapi.security import OAuth2PasswordBearer
+from fastapi import Security
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = db.query(User).filter(User.username == username).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
+
+@router.put("/todos/{todo_id}")
+def update_todo(todo_id: int, todo_data: TodoUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    todo = db.query(Todo).filter(Todo.id == todo_id).first()
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if todo.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to modify this todo")
+    # Update todo fields here
+    db.commit()
+    return todo
+
+
+
+@router.post("/todos/{todo_id}/share")
+def share_todo(todo_id: int, share: ShareRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    todo = db.query(Todo).filter(Todo.id == todo_id).first()
+    if todo is None:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if todo.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only owner can share the todo")
+    user_to_share = db.query(User).filter(User.username == share.username).first()
+    if user_to_share is None:
+        raise HTTPException(status_code=404, detail="User to share with not found")
+    existing_share = db.query(TodoShare).filter(TodoShare.todo_id == todo_id, TodoShare.user_id == user_to_share.id).first()
+    if existing_share:
+        existing_share.role = share.role  # Update role if already shared
+    else:
+        new_share = TodoShare(todo_id=todo_id, user_id=user_to_share.id, role=share.role)
+        db.add(new_share)
+    db.commit()
+    return {"detail": f"Todo shared with {share.username} as {share.role}"}
+
+
+
+@router.get("/todos/shared")
+def get_shared_todos(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    shared_todos = (
+        db.query(Todo)
+        .join(TodoShare, Todo.id == TodoShare.todo_id)
+        .filter(TodoShare.user_id == current_user.id)
+        .all()
+    )
+    return shared_todos
